@@ -1910,6 +1910,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tictactoe"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "serde",
+]
+
+[[package]]
 name = "time"
 version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"

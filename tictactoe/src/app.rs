@@ -1,21 +1,38 @@
+use super::hyperlink::Hyperlink;
 use eframe::{egui, epi};
+use egui::{pos2, vec2, Color32, Pos2, Rect, Stroke, Widget};
+use rand::seq::SliceRandom;
 
-/// We derive Deserialize/Serialize so we can persist app state on shutdown.
-#[cfg_attr(feature = "persistence", derive(serde::Deserialize, serde::Serialize))]
+#[derive(Copy, Clone, Debug, PartialEq)]
+enum Player {
+  User,
+  Computer,
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+struct State {
+  board: [[Option<Player>; 3]; 3],
+  last_player_move_time: Option<f64>,
+}
+
+impl State {
+  fn cells(&mut self) -> impl Iterator<Item = (usize, usize, &mut Option<Player>)> {
+    self
+      .board
+      .iter_mut()
+      .enumerate()
+      .flat_map(|(x, v)| v.iter_mut().enumerate().map(move |(y, v)| (x, y, v)))
+  }
+}
+
 pub struct TicTacToeApp {
-  // Example stuff:
-  label: String,
-  value: f32,
-  painting: Painting,
+  state: State,
 }
 
 impl Default for TicTacToeApp {
   fn default() -> Self {
     Self {
-      // Example stuff:
-      label: "Hello World!".to_owned(),
-      value: 2.7,
-      painting: Default::default(),
+      state: Default::default(),
     }
   }
 }
@@ -25,156 +42,290 @@ impl epi::App for TicTacToeApp {
     "Egui template"
   }
 
-  /// Called by the framework to load old app state (if any).
-  #[cfg(feature = "persistence")]
-  fn load(&mut self, storage: &dyn epi::Storage) {
-    *self = epi::get_value(storage, epi::APP_KEY).unwrap_or_default()
+  fn setup(&mut self, ctx: &egui::CtxRef) {
+    let mut font_definitions = egui::FontDefinitions::default();
+    font_definitions.font_data.insert(
+      "Inter".to_owned(),
+      std::borrow::Cow::Borrowed(include_bytes!("Inter-Regular.ttf")),
+    );
+    font_definitions
+      .fonts_for_family
+      .insert(egui::FontFamily::Proportional, vec!["Inter".to_owned()]);
+    font_definitions.family_and_size.insert(
+      egui::TextStyle::Heading,
+      (egui::FontFamily::Proportional, 48.0),
+    );
+    font_definitions.family_and_size.insert(
+      egui::TextStyle::Button,
+      (egui::FontFamily::Proportional, 32.0),
+    );
+    font_definitions.family_and_size.insert(
+      egui::TextStyle::Body,
+      (egui::FontFamily::Proportional, 16.0),
+    );
+    ctx.set_fonts(font_definitions);
   }
 
-  /// Called by the frame work to save state before shutdown.
-  #[cfg(feature = "persistence")]
-  fn save(&mut self, storage: &mut dyn epi::Storage) {
-    epi::set_value(storage, epi::APP_KEY, self);
-  }
-
-  /// Called each time the UI needs repainting, which may be many times per second.
-  /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
   fn update(&mut self, ctx: &egui::CtxRef, frame: &mut epi::Frame<'_>) {
-    let TicTacToeApp {
-      label,
-      value,
-      painting,
-    } = self;
+    egui::CentralPanel::default()
+      .frame(egui::Frame {
+        margin: vec2(16., 16.),
+        fill: Color32::WHITE,
+        ..Default::default()
+      })
+      .show(ctx, |ui| {
+        let style = ui.style_mut();
+        style.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1., Color32::BLACK);
+        style.visuals.widgets.active.fg_stroke = Stroke::new(1., Color32::BLACK);
+        style.visuals.widgets.hovered.fg_stroke =
+          Stroke::new(1., Color32::from_rgb(0xFF, 0x66, 0x76));
+        style.visuals.widgets.inactive.fg_stroke = Stroke::new(1., Color32::BLACK);
+        style.visuals.hyperlink_color = Color32::BLACK;
 
-    // Examples of how to create different panels and windows.
-    // Pick whichever suits you.
-    // Tip: a good default choice is to just keep the `CentralPanel`.
-    // For inspiration and more examples, go to https://emilk.github.io/egui
+        ui.vertical_centered(|ui| {
+          ui.heading("tictactoe");
+          ui.advance_cursor(24.);
+          let _board_response = self.show_board(ui, frame);
+          ui.advance_cursor(16.);
 
-    egui::SidePanel::left("side_panel", 200.0).show(ctx, |ui| {
-      ui.heading("Side Panel");
-
-      ui.horizontal(|ui| {
-        ui.label("Write something: ");
-        ui.text_edit_singleline(label);
-      });
-
-      ui.add(egui::Slider::f32(value, 0.0..=10.0).text("value"));
-      if ui.button("Increment").clicked {
-        *value += 1.0;
-      }
-
-      ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-        ui.add(egui::Hyperlink::new("https://github.com/emilk/egui/").text("powered by egui"));
-      });
-    });
-
-    egui::TopPanel::top("top_panel").show(ctx, |ui| {
-      // The top panel is often a good place for a menu bar:
-      egui::menu::bar(ui, |ui| {
-        egui::menu::menu(ui, "File", |ui| {
-          if ui.button("Quit").clicked {
-            frame.quit();
+          let button = egui::Button::new("reset").frame(false);
+          if button.ui(ui).clicked {
+            self.state.last_player_move_time = None;
+            self.state.board = Default::default();
+            ui.ctx().request_repaint();
           }
+
+          ui.advance_cursor(16.);
+          ui.allocate_ui(vec2(_board_response.rect.width(), 0.), |ui| {
+            ui.horizontal_wrapped_for_text(egui::TextStyle::Body, |ui| {
+              ui.label("Built with Rust and");
+              ui.add(Hyperlink::new("https://github.com/emilk/egui").text("egui"));
+              ui.label("\nDon't try too hard. The \"AI\" makes random moves.");
+            });
+          })
         });
       });
-    });
 
-    egui::CentralPanel::default().show(ctx, |ui| {
-      ui.heading("Egui Template");
-      ui.hyperlink("https://github.com/emilk/egui_template");
-      ui.add(egui::github_link_file_line!(
-        "https://github.com/emilk/egui_template/blob/master/",
-        "Direct link to source code."
-      ));
-      egui::warn_if_debug_build(ui);
-
-      ui.separator();
-
-      ui.heading("Central Panel");
-      ui.label("The central panel the region left after adding TopPanel's and SidePanel's");
-      ui.label("It is often a great place for big things, like drawings:");
-
-      ui.heading("Draw with your mouse to paint:");
-      painting.ui_control(ui);
-      egui::Frame::dark_canvas(ui.style()).show(ui, |ui| {
-        painting.ui_content(ui);
-      });
-    });
-
-    if false {
-      egui::Window::new("Window").show(ctx, |ui| {
-        ui.label("Windows can be moved by dragging them.");
-        ui.label("They are automatically sized based on contents.");
-        ui.label("You can turn on resizing and scrolling if you like.");
-        ui.label("You would normally chose either panels OR windows.");
-      });
-    }
-
-    // Resize the native window to be just the size we need it to be:
     frame.set_window_size(ctx.used_size());
   }
 }
 
-// ----------------------------------------------------------------------------
+impl TicTacToeApp {
+  const CELL_SIZE: f32 = 108.;
+  const GRID_LINE_WIDTH: f32 = 4.;
 
-/// Example code for painting on a canvas with your mouse
-#[cfg_attr(feature = "persistence", derive(serde::Deserialize, serde::Serialize))]
-struct Painting {
-  lines: Vec<Vec<egui::Vec2>>,
-  stroke: egui::Stroke,
-}
+  fn show_board(&mut self, ui: &mut egui::Ui, frame: &mut epi::Frame<'_>) -> egui::Response {
+    let cell_size = Self::CELL_SIZE;
+    let grid_size = cell_size * 3. + Self::GRID_LINE_WIDTH * 2.;
 
-impl Default for Painting {
-  fn default() -> Self {
-    Self {
-      lines: Default::default(),
-      stroke: egui::Stroke::new(1.0, egui::Color32::LIGHT_BLUE),
-    }
-  }
-}
+    let (id, rect) = ui.allocate_space(vec2(grid_size, grid_size));
+    draw_grid(ui, rect);
 
-impl Painting {
-  pub fn ui_control(&mut self, ui: &mut egui::Ui) -> egui::Response {
-    ui.horizontal(|ui| {
-      egui::widgets::stroke_ui(ui, &mut self.stroke, "Stroke");
-      ui.separator();
-      if ui.button("Clear Painting").clicked {
-        self.lines.clear();
-      }
-    })
-    .1
-  }
+    let board_interact = ui.interact(rect, id, egui::Sense::click());
 
-  pub fn ui_content(&mut self, ui: &mut egui::Ui) -> egui::Response {
-    let (response, painter) =
-      ui.allocate_painter(ui.available_size_before_wrap_finite(), egui::Sense::drag());
-    let rect = response.rect;
+    let num_player = self
+      .state
+      .cells()
+      .filter(|(_, _, p)| **p == Some(Player::User))
+      .count();
+    let num_computer = self
+      .state
+      .cells()
+      .filter(|(_, _, p)| **p == Some(Player::Computer))
+      .count();
 
-    if self.lines.is_empty() {
-      self.lines.push(vec![]);
-    }
+    let winning_cells = get_winner(self.state.board).map(|(_, cells)| cells);
 
-    let current_line = self.lines.last_mut().unwrap();
+    let hc = if winning_cells.is_none() && board_interact.hovered {
+      ui.input()
+        .mouse
+        .pos
+        .and_then(|mouse_pos| hovered_coord(&rect, mouse_pos))
+    } else {
+      None
+    };
 
-    if response.active {
-      if let Some(mouse_pos) = ui.input().mouse.pos {
-        let canvas_pos = mouse_pos - rect.min;
-        if current_line.last() != Some(&canvas_pos) {
-          current_line.push(canvas_pos);
+    if winning_cells.is_none() && num_player > num_computer && num_player + num_computer < 9 {
+      if let Some(last_player_move_time) = self.state.last_player_move_time {
+        if ui.input().time - last_player_move_time > 0.5 {
+          let empty_cells: Vec<(usize, usize)> = self
+            .state
+            .cells()
+            .filter(|(_, _, p)| p.is_none())
+            .map(|(r, c, _)| (r, c))
+            .collect();
+          if let Some((r, c)) = empty_cells.choose(&mut rand::thread_rng()) {
+            self.state.board[*r][*c] = Some(Player::Computer);
+            ui.ctx().request_repaint();
+          }
         }
       }
-    } else if !current_line.is_empty() {
-      self.lines.push(vec![]);
     }
 
-    for line in &self.lines {
-      if line.len() >= 2 {
-        let points: Vec<egui::Pos2> = line.iter().map(|p| rect.min + *p).collect();
-        painter.add(egui::Shape::line(points, self.stroke));
+    let painter = ui.painter();
+
+    if let Some(hovered_coord) = hc {
+      painter.rect_filled(
+        Rect::from_center_size(
+          Self::center_for_coord(&rect, hovered_coord),
+          vec2(cell_size, cell_size),
+        ),
+        0.,
+        Color32::BLACK,
+      );
+
+      if board_interact.clicked && num_player == num_computer {
+        let (r, c) = hovered_coord;
+        if self.state.board[r][c].is_none() {
+          self.state.board[r][c] = Some(Player::User);
+          self.state.last_player_move_time = Some(ui.input().time);
+
+          let repaint_signal = frame.repaint_signal();
+          request_repaint(repaint_signal);
+        }
       }
     }
 
-    response
+    for (r, c, p) in self.state.cells() {
+      if let Some(p) = *p {
+        let center = Self::center_for_coord(&rect, (r, c));
+        let color =
+          if winning_cells.map(|winning_cells| winning_cells.contains(&(r, c))) == Some(true) {
+            Color32::from_rgb(0xFF, 0xCB, 0x66)
+          } else if hc == Some((r, c)) {
+            Color32::WHITE
+          } else {
+            Color32::BLACK
+          };
+        match p {
+          Player::User => {
+            let bounds =
+              Rect::from_center_size(center, vec2(Self::CELL_SIZE - 16., Self::CELL_SIZE - 16.));
+            painter.line_segment([bounds.left_top(), bounds.right_bottom()], (4., color));
+            painter.line_segment([bounds.left_bottom(), bounds.right_top()], (4., color));
+          }
+          Player::Computer => {
+            painter.circle_stroke(center, (Self::CELL_SIZE - 16.) / 2., (4., color));
+          }
+        }
+      }
+    }
+
+    board_interact
   }
+
+  fn center_for_coord(rect: &Rect, coord: (usize, usize)) -> Pos2 {
+    pos2(
+      rect.left()
+        + coord.1 as f32 * (Self::CELL_SIZE + Self::GRID_LINE_WIDTH)
+        + (Self::CELL_SIZE / 2.),
+      rect.top()
+        + coord.0 as f32 * (Self::CELL_SIZE + Self::GRID_LINE_WIDTH)
+        + (Self::CELL_SIZE / 2.),
+    )
+  }
+}
+
+fn coords() -> impl Iterator<Item = (usize, usize)> {
+  (0..3).flat_map(move |r| (0..3).map(move |c| (r, c)))
+}
+
+fn draw_grid(ui: &mut egui::Ui, rect: Rect) {
+  let painter = ui.painter();
+  for i in 1..=2 {
+    let offset =
+      TicTacToeApp::CELL_SIZE * i as f32 + (TicTacToeApp::GRID_LINE_WIDTH * (i - 1) as f32);
+    painter.line_segment(
+      [
+        pos2(
+          rect.left() + offset + TicTacToeApp::GRID_LINE_WIDTH / 2.,
+          rect.top(),
+        ),
+        pos2(
+          rect.left() + offset + TicTacToeApp::GRID_LINE_WIDTH / 2.,
+          rect.bottom(),
+        ),
+      ],
+      (TicTacToeApp::GRID_LINE_WIDTH, Color32::BLACK),
+    );
+    painter.line_segment(
+      [
+        pos2(
+          rect.left(),
+          rect.top() + offset + TicTacToeApp::GRID_LINE_WIDTH / 2.,
+        ),
+        pos2(
+          rect.right(),
+          rect.top() + offset + TicTacToeApp::GRID_LINE_WIDTH / 2.,
+        ),
+      ],
+      (TicTacToeApp::GRID_LINE_WIDTH, Color32::BLACK),
+    );
+  }
+}
+
+fn hovered_coord(rect: &Rect, mouse_pos: Pos2) -> Option<(usize, usize)> {
+  for c in coords() {
+    let y = c.0 as f32 * (TicTacToeApp::CELL_SIZE + TicTacToeApp::GRID_LINE_WIDTH) + rect.top();
+    let x = c.1 as f32 * (TicTacToeApp::CELL_SIZE + TicTacToeApp::GRID_LINE_WIDTH) + rect.left();
+    let left = x;
+    let top = y;
+    let right = x + TicTacToeApp::CELL_SIZE;
+    let bottom = y + TicTacToeApp::CELL_SIZE;
+    let is_hovering =
+      left <= mouse_pos.x && mouse_pos.x <= right && top <= mouse_pos.y && mouse_pos.y <= bottom;
+    if is_hovering {
+      return Some(c);
+    }
+  }
+  None
+}
+
+fn get_winner(board: [[Option<Player>; 3]; 3]) -> Option<(Player, [(usize, usize); 3])> {
+  for (r, row) in board.iter().enumerate() {
+    if let Some(p) = row[0] {
+      if row[1] == Some(p) && row[2] == Some(p) {
+        return Some((p, [(r, 0), (r, 1), (r, 2)]));
+      }
+    }
+  }
+  for c in 0..3 {
+    if let Some(p) = board[0][c] {
+      if board[1][c] == Some(p) && board[2][c] == Some(p) {
+        return Some((p, [(0, c), (1, c), (2, c)]));
+      }
+    }
+  }
+  if let Some(p) = board[0][0] {
+    if board[1][1] == Some(p) && board[2][2] == Some(p) {
+      return Some((p, [(0, 0), (1, 1), (2, 2)]));
+    }
+  }
+  if let Some(p) = board[0][2] {
+    if board[1][1] == Some(p) && board[2][0] == Some(p) {
+      return Some((p, [(0, 2), (1, 1), (2, 0)]));
+    }
+  }
+  None
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn request_repaint(repaint_signal: std::sync::Arc<dyn epi::RepaintSignal>) {
+  use wasm_bindgen::JsCast;
+  let window = web_sys::window().unwrap();
+  let closure = wasm_bindgen::prelude::Closure::wrap(Box::new(move || {
+    repaint_signal.request_repaint();
+  }) as Box<dyn FnMut()>);
+  window
+    .set_timeout_with_callback_and_timeout_and_arguments_0(closure.as_ref().unchecked_ref(), 500)
+    .unwrap();
+  closure.forget();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn request_repaint(repaint_signal: std::sync::Arc<dyn epi::RepaintSignal>) {
+  std::thread::spawn(move || {
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    repaint_signal.request_repaint();
+  });
 }

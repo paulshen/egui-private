@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eu
 
-CRATE_NAME="egui_demo_app"
+CRATE_NAME="tictactoe"
 
 # This is required to enable the web_sys clipboard API which egui_web uses
 # https://rustwasm.github.io/wasm-bindgen/api/web_sys/struct.Clipboard.html
@@ -13,7 +13,7 @@ rm -f docs/${CRATE_NAME}_bg.wasm
 
 echo "Building rust…"
 BUILD=release
-cargo build --release --all-features -p ${CRATE_NAME} --lib --target wasm32-unknown-unknown
+cargo build --release -p ${CRATE_NAME} --lib --target wasm32-unknown-unknown
 
 echo "Generating JS bindings for wasm…"
 TARGET_NAME="${CRATE_NAME}.wasm"
@@ -21,5 +21,3 @@ wasm-bindgen "target/wasm32-unknown-unknown/$BUILD/$TARGET_NAME" \
   --out-dir docs --no-modules --no-typescript
 
 echo "Finished: docs/${CRATE_NAME}.wasm"
-
-open http://localhost:8888/index.html

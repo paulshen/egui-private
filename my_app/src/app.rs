@@ -1,16 +1,15 @@
 use eframe::{egui, epi};
-use egui::{vec2, Color32, Stroke};
-
-struct State {}
+use egui::{Color32, Stroke, Vec2};
 
 pub struct MyApp {
-  #[allow(unused)]
-  state: State,
+  colored_text: ColoredText,
 }
 
 impl Default for MyApp {
   fn default() -> Self {
-    Self { state: State {} }
+    MyApp {
+      colored_text: syntax_highlighting(SAMPLE_CODE),
+    }
   }
 }
 
@@ -42,7 +41,7 @@ impl epi::App for MyApp {
   fn update(&mut self, ctx: &egui::CtxRef, frame: &mut epi::Frame<'_>) {
     egui::CentralPanel::default()
       .frame(egui::Frame {
-        margin: vec2(16., 16.),
+        margin: Vec2::zero(),
         fill: Color32::WHITE,
         ..Default::default()
       })
@@ -50,28 +49,162 @@ impl epi::App for MyApp {
         let style = ui.style_mut();
         style.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1., Color32::BLACK);
 
-        ui.vertical_centered(|ui| {
-          ui.heading("My App");
-          ui.advance_cursor(16.);
-
-          let (id, rect) = ui.allocate_space(vec2(256., 256.));
-          let board_interact = ui.interact(rect, id, egui::Sense::click());
-          let painter = ui.painter();
-          painter.rect_stroke(
-            rect,
-            4.,
-            Stroke::new(
-              4.,
-              if board_interact.hovered {
-                Color32::GRAY
-              } else {
-                Color32::BLACK
-              },
-            ),
-          );
+        egui::ScrollArea::auto_sized().show(ui, |ui| {
+          for line in &self.colored_text.0 {
+            ui.horizontal_wrapped_for_text(egui::TextStyle::Monospace, |ui| {
+              ui.style_mut().spacing.item_spacing.x = 0.0;
+              for (style, range) in line {
+                let fg = style.foreground;
+                let text_color = egui::Color32::from_rgb(fg.r, fg.g, fg.b);
+                ui.add(egui::Label::new(range).monospace().text_color(text_color));
+              }
+            });
+          }
         });
       });
 
     frame.set_window_size(ctx.used_size());
+  }
+}
+
+const SAMPLE_CODE: &str =
+  "export function createWorkInProgress(current: Fiber, pendingProps: any): Fiber {
+  let workInProgress = current.alternate;
+  if (workInProgress === null) {
+    // We use a double buffering pooling technique because we know that we'll
+    // only ever need at most two versions of a tree. We pool the other unused
+    // node that we're free to reuse. This is lazily created to avoid allocating
+    // extra objects for things that are never updated. It also allow us to
+    // reclaim the extra memory if needed.
+    workInProgress = createFiber(
+      current.tag,
+      pendingProps,
+      current.key,
+      current.mode,
+    );
+    workInProgress.elementType = current.elementType;
+    workInProgress.type = current.type;
+    workInProgress.stateNode = current.stateNode;
+
+    if (__DEV__) {
+      // DEV-only fields
+      workInProgress._debugID = current._debugID;
+      workInProgress._debugSource = current._debugSource;
+      workInProgress._debugOwner = current._debugOwner;
+      workInProgress._debugHookTypes = current._debugHookTypes;
+    }
+
+    workInProgress.alternate = current;
+    current.alternate = workInProgress;
+  } else {
+    workInProgress.pendingProps = pendingProps;
+    // Needed because Blocks store data on type.
+    workInProgress.type = current.type;
+
+    // We already have an alternate.
+    // Reset the effect tag.
+    workInProgress.flags = NoFlags;
+
+    // The effect list is no longer valid.
+    workInProgress.nextEffect = null;
+    workInProgress.firstEffect = null;
+    workInProgress.lastEffect = null;
+    workInProgress.subtreeFlags = NoFlags;
+    workInProgress.deletions = null;
+
+    if (enableProfilerTimer) {
+      // We intentionally reset, rather than copy, actualDuration & actualStartTime.
+      // This prevents time from endlessly accumulating in new commits.
+      // This has the downside of resetting values for different priority renders,
+      // But works for yielding (the common case) and should support resuming.
+      workInProgress.actualDuration = 0;
+      workInProgress.actualStartTime = -1;
+    }
+  }
+
+  // Reset all effects except static ones.
+  // Static effects are not specific to a render.
+  workInProgress.flags = current.flags & StaticMask;
+  workInProgress.childLanes = current.childLanes;
+  workInProgress.lanes = current.lanes;
+
+  workInProgress.child = current.child;
+  workInProgress.memoizedProps = current.memoizedProps;
+  workInProgress.memoizedState = current.memoizedState;
+  workInProgress.updateQueue = current.updateQueue;
+
+  // Clone the dependencies object. This is mutated during the render phase, so
+  // it cannot be shared with the current fiber.
+  const currentDependencies = current.dependencies;
+  workInProgress.dependencies =
+    currentDependencies === null
+      ? null
+      : {
+          lanes: currentDependencies.lanes,
+          firstContext: currentDependencies.firstContext,
+        };
+
+  // These will be overridden during the parent's reconciliation
+  workInProgress.sibling = current.sibling;
+  workInProgress.index = current.index;
+  workInProgress.ref = current.ref;
+
+  if (enableProfilerTimer) {
+    workInProgress.selfBaseDuration = current.selfBaseDuration;
+    workInProgress.treeBaseDuration = current.treeBaseDuration;
+  }
+
+  if (__DEV__) {
+    workInProgress._debugNeedsRemount = current._debugNeedsRemount;
+    switch (workInProgress.tag) {
+      case IndeterminateComponent:
+      case FunctionComponent:
+      case SimpleMemoComponent:
+        workInProgress.type = resolveFunctionForHotReloading(current.type);
+        break;
+      case ClassComponent:
+        workInProgress.type = resolveClassForHotReloading(current.type);
+        break;
+      case ForwardRef:
+        workInProgress.type = resolveForwardRefForHotReloading(current.type);
+        break;
+      default:
+        break;
+    }
+  }
+
+  return workInProgress;
+}";
+
+struct ColoredText(Vec<Vec<(syntect::highlighting::Style, String)>>);
+
+fn syntax_highlighting(text: &str) -> ColoredText {
+  ColoredText::text_with_extension(text, "js")
+}
+
+impl ColoredText {
+  fn text_with_extension(text: &str, extension: &str) -> ColoredText {
+    use syntect::easy::HighlightLines;
+    use syntect::highlighting::ThemeSet;
+    use syntect::parsing::SyntaxSet;
+    use syntect::util::LinesWithEndings;
+
+    let ps = SyntaxSet::load_defaults_newlines(); // should be cached and reused
+    let ts = ThemeSet::load_defaults(); // should be cached and reused
+
+    let syntax = ps.find_syntax_by_extension(extension).unwrap();
+
+    let mut h = HighlightLines::new(syntax, &ts.themes["base16-mocha.dark"]);
+
+    let lines = LinesWithEndings::from(text)
+      .map(|line| {
+        h.highlight(line, &ps)
+          .into_iter()
+          .map(|(style, range)| (style, range.trim_end_matches('\n').to_owned()))
+          .collect()
+      })
+      .collect();
+
+    ColoredText(lines)
   }
 }

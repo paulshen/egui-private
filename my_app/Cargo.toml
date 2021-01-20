@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 eframe = { version = "0.8.0", path = "../eframe", features = ["time"] }
 egui = { version = "0.8.0", path = "../egui" }
+syntect = { version = "4", default_features = false, features = ["default-fancy"], optional = true }
 
 serde = { version = "1", features = ["derive"], optional = true }
 
@@ -20,7 +21,7 @@ wasm-bindgen = "0.2"
 web-sys = "0.3"
 
 [features]
-default = []
+default = ["syntect"]
 http = ["eframe/http"]
 persistence = ["eframe/persistence", "serde"]
 

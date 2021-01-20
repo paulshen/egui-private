@@ -1,0 +1,28 @@
+[package]
+name = "my_app"
+version = "0.1.0"
+authors = ["Paul Shen <paulshen0@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+eframe = { version = "0.8.0", path = "../eframe", features = ["time"] }
+egui = { version = "0.8.0", path = "../egui" }
+
+serde = { version = "1", features = ["derive"], optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+web-sys = "0.3"
+
+[features]
+default = []
+http = ["eframe/http"]
+persistence = ["eframe/persistence", "serde"]
+
+[profile.release]
+opt-level = 2

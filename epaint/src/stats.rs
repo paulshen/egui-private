@@ -182,6 +182,9 @@ impl PaintStats {
             Shape::Text { galley, .. } => {
                 self.shape_text += AllocInfo::from_galley(galley);
             }
+            Shape::ColoredText { galley, .. } => {
+                self.shape_text += AllocInfo::from_galley(galley);
+            }
             Shape::Triangles(triangles) => {
                 self.shape_mesh += AllocInfo::from_triangles(triangles);
             }

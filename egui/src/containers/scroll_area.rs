@@ -366,5 +366,5 @@ impl Prepared {
 }
 
 fn max_scroll_bar_width_with_margin(ui: &Ui) -> f32 {
-    ui.style().spacing.item_spacing.x + 16.0
+    ui.style().spacing.item_spacing.x + 12.0
 }

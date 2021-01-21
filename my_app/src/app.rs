@@ -1,5 +1,6 @@
+use crate::code::{Code, ColoredText};
 use eframe::{egui, epi};
-use egui::{Color32, Stroke, Vec2};
+use egui::{vec2, Color32, Stroke, Vec2, Widget};
 
 pub struct MyApp {
   colored_text: ColoredText,
@@ -21,16 +22,9 @@ impl epi::App for MyApp {
   fn setup(&mut self, ctx: &egui::CtxRef) {
     let mut font_definitions = egui::FontDefinitions::default();
     font_definitions.font_data.insert(
-      "Inter".to_owned(),
-      std::borrow::Cow::Borrowed(include_bytes!("Inter-Regular.ttf")),
-    );
-    font_definitions.font_data.insert(
       "JetBrainsMono".to_owned(),
       std::borrow::Cow::Borrowed(include_bytes!("JetBrainsMono-Regular.ttf")),
     );
-    font_definitions
-      .fonts_for_family
-      .insert(egui::FontFamily::Proportional, vec!["Inter".to_owned()]);
     font_definitions.fonts_for_family.insert(
       egui::FontFamily::Monospace,
       vec!["JetBrainsMono".to_owned()],
@@ -42,24 +36,30 @@ impl epi::App for MyApp {
     egui::CentralPanel::default()
       .frame(egui::Frame {
         margin: Vec2::zero(),
-        fill: Color32::WHITE,
+        fill: Color32::from_rgb(0x2b, 0x30, 0x3b),
         ..Default::default()
       })
       .show(ctx, |ui| {
         let style = ui.style_mut();
         style.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1., Color32::BLACK);
+        style.visuals.dark_bg_color = Color32::from_rgb(0x2b, 0x30, 0x3b);
+        style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(0x4f, 0x5b, 0x66);
+        style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(0x4f, 0x5b, 0x66);
+        style.visuals.widgets.active.bg_fill = Color32::from_rgb(0x4f, 0x5b, 0x66);
+        style.visuals.widgets.hovered.bg_stroke =
+          Stroke::new(1., Color32::from_rgb(0x8f, 0xa1, 0xb3));
+        style.visuals.widgets.active.bg_stroke =
+          Stroke::new(1., Color32::from_rgb(0x8f, 0xa1, 0xb3));
 
         egui::ScrollArea::auto_sized().show(ui, |ui| {
-          for line in &self.colored_text.0 {
-            ui.horizontal_wrapped_for_text(egui::TextStyle::Monospace, |ui| {
-              ui.style_mut().spacing.item_spacing.x = 0.0;
-              for (style, range) in line {
-                let fg = style.foreground;
-                let text_color = egui::Color32::from_rgb(fg.r, fg.g, fg.b);
-                ui.add(egui::Label::new(range).monospace().text_color(text_color));
-              }
-            });
+          egui::Frame {
+            margin: vec2(16., 16.),
+            ..Default::default()
           }
+          .show(ui, |ui| {
+            let code = Code::new(SAMPLE_CODE, &self.colored_text);
+            code.ui(ui);
+          })
         });
       });
 
@@ -176,8 +176,6 @@ const SAMPLE_CODE: &str =
   return workInProgress;
 }";
 
-struct ColoredText(Vec<Vec<(syntect::highlighting::Style, String)>>);
-
 fn syntax_highlighting(text: &str) -> ColoredText {
   ColoredText::text_with_extension(text, "js")
 }
@@ -194,7 +192,7 @@ impl ColoredText {
 
     let syntax = ps.find_syntax_by_extension(extension).unwrap();
 
-    let mut h = HighlightLines::new(syntax, &ts.themes["base16-mocha.dark"]);
+    let mut h = HighlightLines::new(syntax, &ts.themes["base16-ocean.dark"]);
 
     let lines = LinesWithEndings::from(text)
       .map(|line| {

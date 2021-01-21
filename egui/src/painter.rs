@@ -276,4 +276,20 @@ impl Painter {
             color,
         });
     }
+
+    /// Paint text that has already been layed out in a `Galley`.
+    pub fn galley_colored(
+        &self,
+        pos: Pos2,
+        galley: Galley,
+        text_style: TextStyle,
+        colors: Vec<(usize, Color32)>,
+    ) {
+        self.add(Shape::ColoredText {
+            pos,
+            galley,
+            text_style,
+            colors,
+        });
+    }
 }

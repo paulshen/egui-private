@@ -559,6 +559,25 @@ impl Tessellator {
                 }
                 self.tessellate_text(fonts, pos, &galley, text_style, color, out);
             }
+            Shape::ColoredText {
+                pos,
+                galley,
+                text_style,
+                colors,
+            } => {
+                if options.debug_paint_text_rects {
+                    self.tessellate_rect(
+                        &PaintRect {
+                            rect: Rect::from_min_size(pos, galley.size).expand(0.5),
+                            corner_radius: 2.0,
+                            fill: Default::default(),
+                            stroke: (0.5, colors[0].1).into(),
+                        },
+                        out,
+                    );
+                }
+                self.tessellate_colored_text(fonts, pos, &galley, text_style, &colors, out);
+            }
         }
     }
 
@@ -650,6 +669,69 @@ impl Tessellator {
             }
         }
         assert_eq!(chars.next(), None);
+    }
+
+    pub fn tessellate_colored_text(
+        &mut self,
+        fonts: &Fonts,
+        pos: Pos2,
+        galley: &super::Galley,
+        text_style: super::TextStyle,
+        colors: &[(usize, Color32)],
+        out: &mut Triangles,
+    ) {
+        galley.sanity_check();
+
+        let num_chars = galley.text.chars().count();
+        out.reserve_triangles(num_chars * 2);
+        out.reserve_vertices(num_chars * 4);
+
+        let tex_w = fonts.texture().width as f32;
+        let tex_h = fonts.texture().height as f32;
+
+        let clip_rect = self.clip_rect.expand(2.0); // Some fudge to handle letters that are slightly larger than expected.
+
+        let font = &fonts[text_style];
+        let mut color_indices = colors.iter();
+        let mut current_color_index = color_indices.next().unwrap();
+        let mut char_indices = galley.text.char_indices();
+        for line in &galley.rows {
+            let line_min_y = pos.y + line.y_min;
+            let line_max_y = line_min_y + font.row_height();
+            let is_line_visible = line_max_y >= clip_rect.min.y && line_min_y <= clip_rect.max.y;
+
+            for x_offset in line.x_offsets.iter().take(line.x_offsets.len() - 1) {
+                let (i, c) = char_indices.next().unwrap();
+                if i >= current_color_index.0 {
+                    current_color_index = color_indices.next().unwrap();
+                }
+                let color = current_color_index.1;
+
+                if self.options.coarse_tessellation_culling && !is_line_visible {
+                    // culling individual lines of text is important, since a single `Shape::Text`
+                    // can span hundreds of lines.
+                    continue;
+                }
+
+                if let Some(glyph) = font.uv_rect(c) {
+                    let mut left_top = pos + glyph.offset + vec2(*x_offset, line.y_min);
+                    left_top.x = font.round_to_pixel(left_top.x); // Pixel-perfection.
+                    left_top.y = font.round_to_pixel(left_top.y); // Pixel-perfection.
+
+                    let pos = Rect::from_min_max(left_top, left_top + glyph.size);
+                    let uv = Rect::from_min_max(
+                        pos2(glyph.min.0 as f32 / tex_w, glyph.min.1 as f32 / tex_h),
+                        pos2(glyph.max.0 as f32 / tex_w, glyph.max.1 as f32 / tex_h),
+                    );
+                    out.add_rect_with_uv(pos, uv, color);
+                }
+            }
+            if line.ends_with_newline {
+                let newline = char_indices.next().unwrap();
+                debug_assert_eq!(newline.1, '\n');
+            }
+        }
+        assert_eq!(char_indices.next(), None);
     }
 }
 

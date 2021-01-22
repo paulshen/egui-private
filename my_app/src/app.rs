@@ -3,12 +3,14 @@ use eframe::{egui, epi};
 use egui::{vec2, Color32, Stroke, Vec2, Widget};
 
 pub struct MyApp {
-  colored_text: ColoredText,
+  pub code: String,
+  pub colored_text: ColoredText,
 }
 
 impl Default for MyApp {
   fn default() -> Self {
     MyApp {
+      code: SAMPLE_CODE.to_string(),
       colored_text: syntax_highlighting(SAMPLE_CODE),
     }
   }
@@ -33,6 +35,10 @@ impl epi::App for MyApp {
   }
 
   fn update(&mut self, ctx: &egui::CtxRef, frame: &mut epi::Frame<'_>) {
+    if let Some(egui::Event::Call(s)) = ctx.input().events.get(0) {
+      self.code = s.to_string();
+      self.colored_text = syntax_highlighting(s);
+    }
     egui::CentralPanel::default()
       .frame(egui::Frame {
         margin: Vec2::zero(),
@@ -57,7 +63,7 @@ impl epi::App for MyApp {
             ..Default::default()
           }
           .show(ui, |ui| {
-            let code = Code::new(SAMPLE_CODE, &self.colored_text);
+            let code = Code::new(&self.code, &self.colored_text);
             code.ui(ui);
           })
         });

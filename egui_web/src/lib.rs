@@ -559,7 +559,24 @@ fn install_document_events(runner_ref: &AppRunnerRef) -> Result<(), JsValue> {
         closure.forget();
     }
 
+    {
+        let runner_ref = runner_ref.clone();
+        let closure = Closure::wrap(Box::new(move |s: String| {
+            let mut runner_lock = runner_ref.0.lock();
+            runner_lock.input.raw.events.push(egui::Event::Call(s));
+            runner_lock.needs_repaint.set_true();
+        }) as Box<dyn FnMut(String)>);
+        set_callback(&closure);
+        closure.forget();
+    }
+
     Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+extern "C" {
+    fn set_callback(closure: &Closure<dyn FnMut(String)>);
 }
 
 /// Repaint at least every `ms` milliseconds.

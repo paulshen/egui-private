@@ -1227,6 +1227,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
+ "egui_web",
  "serde",
  "syntect",
  "wasm-bindgen",

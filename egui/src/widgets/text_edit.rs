@@ -472,6 +472,8 @@ impl<'t> TextEdit<'t> {
                     } => on_key_press(&mut cursorp, text, &galley, *key, modifiers),
 
                     Event::Key { .. } => None,
+
+                    Event::Call(_) => None,
                 };
 
                 if let Some(new_ccursorp) = did_mutate_text {

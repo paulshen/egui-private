@@ -1,10 +1,21 @@
 use crate::code::{Code, ColoredText};
 use eframe::{egui, epi};
 use egui::{vec2, Color32, Stroke, Vec2, Widget};
+use serde::{Deserialize, Serialize};
+use std::sync::mpsc::{Receiver, Sender};
+use wasm_bindgen::prelude::*;
+
+#[derive(Serialize, Deserialize, Debug)]
+struct JsCallResponse {
+  kind: String,
+  value: String,
+}
 
 pub struct MyApp {
   pub code: String,
   pub colored_text: ColoredText,
+  counter: i32,
+  channel: (Sender<JsCallResponse>, Receiver<JsCallResponse>),
 }
 
 impl Default for MyApp {
@@ -12,6 +23,8 @@ impl Default for MyApp {
     MyApp {
       code: SAMPLE_CODE.to_string(),
       colored_text: syntax_highlighting(SAMPLE_CODE),
+      counter: 0,
+      channel: std::sync::mpsc::channel(),
     }
   }
 }
@@ -35,9 +48,23 @@ impl epi::App for MyApp {
   }
 
   fn update(&mut self, ctx: &egui::CtxRef, frame: &mut epi::Frame<'_>) {
+    let (_, receiver) = &self.channel;
+    if let Ok(result) = receiver.try_recv() {
+      self.counter += 1;
+      egui_web::console_log(format!("receive value {:?} {}", result, self.counter));
+    }
+
     if let Some(egui::Event::Call(s)) = ctx.input().events.get(0) {
       self.code = s.to_string();
       self.colored_text = syntax_highlighting(s);
+      let (sender, _) = &self.channel;
+      let repaint_signal = frame.repaint_signal();
+      let sender = sender.clone();
+      egui_web::spawn_future(async move {
+        let x = go().await;
+        sender.send(x).ok();
+        repaint_signal.request_repaint();
+      });
     }
     egui::CentralPanel::default()
       .frame(egui::Frame {
@@ -211,4 +238,15 @@ impl ColoredText {
 
     ColoredText(lines)
   }
+}
+
+async fn go() -> JsCallResponse {
+  let js_value = make_call(42).await;
+  let call_value: JsCallResponse = js_value.into_serde().unwrap();
+  call_value
+}
+
+#[wasm_bindgen]
+extern "C" {
+  async fn make_call(value: i32) -> JsValue;
 }

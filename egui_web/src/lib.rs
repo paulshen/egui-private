@@ -4,7 +4,7 @@
 //!
 //! If you are writing an app, you may want to look at [`eframe`](https://docs.rs/eframe) instead.
 
-#![forbid(unsafe_code)]
+// #![forbid(unsafe_code)]
 #![cfg_attr(not(debug_assertions), deny(warnings))] // Forbid warnings in release builds
 #![warn(clippy::all, rust_2018_idioms)]
 
@@ -573,7 +573,6 @@ fn install_document_events(runner_ref: &AppRunnerRef) -> Result<(), JsValue> {
     Ok(())
 }
 
-#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 extern "C" {
     fn set_callback(closure: &Closure<dyn FnMut(String)>);

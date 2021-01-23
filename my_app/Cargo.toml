@@ -14,17 +14,18 @@ eframe = { version = "0.8.0", path = "../eframe", features = ["time"] }
 egui = { version = "0.8.0", path = "../egui" }
 syntect = { version = "4", default_features = false, features = ["default-fancy"], optional = true }
 
-serde = { version = "1", features = ["derive"], optional = true }
+serde = { version = "1", features = ["derive"] }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = { version = "0.2", features = ["nightly"] }
+wasm-bindgen = { version = "0.2", features = ["nightly", "serde-serialize"] }
 web-sys = "0.3"
 egui_web = { version = "0.8.0", path = "../egui_web" }
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
 
 [features]
 default = ["syntect"]
 http = ["eframe/http"]
-persistence = ["eframe/persistence", "serde"]
+persistence = ["eframe/persistence"]
 
 [profile.release]
 opt-level = 2

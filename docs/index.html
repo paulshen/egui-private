@@ -74,6 +74,15 @@
             wasm_bindgen.start("canvas");
         }
     </script>
+
+    <script src="app.bundle.js"></script>
+    <script type="application/javascript" src="react.js"></script>
+    <script type="application/javascript">
+        window.REACT_SOURCE.forEach(({path, content}) => {
+            monaco.editor.createModel(content, 'typescript', `file:///${path}`);
+        });
+        window.rust_callback(monaco.editor.getModel('file:///react-reconciler/src/ReactFiberReconciler.new.js').getValue());
+    </script>
 </body>
 
 </html>

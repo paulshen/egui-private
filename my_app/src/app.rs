@@ -2,46 +2,20 @@ use crate::code::{Code, ColoredText};
 use crate::js;
 use eframe::{egui, epi};
 use egui::*;
-use serde::Deserialize;
 use wasm_bindgen::prelude::Closure;
 
 pub struct MyApp {
+  pub filename: String,
   pub code: String,
   pub colored_text: ColoredText,
   hover_offset: Option<(usize, f64, bool)>,
-  display_quick_info: Option<QuickInfoResponse>,
-}
-
-#[derive(Deserialize, Debug)]
-struct TextSpan {
-  start: usize,
-  length: usize,
-}
-
-impl TextSpan {
-  fn includes_offset(&self, offset: usize) -> bool {
-    offset >= self.start && offset < self.start + self.length
-  }
-}
-
-#[derive(Deserialize, Debug)]
-struct DisplayPart {
-  text: String,
-  kind: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct QuickInfoResponse {
-  kind: String,
-  #[serde(rename = "textSpan")]
-  text_span: TextSpan,
-  #[serde(rename = "displayParts")]
-  display_parts: Vec<DisplayPart>,
+  display_quick_info: Option<js::QuickInfoResponse>,
 }
 
 impl Default for MyApp {
   fn default() -> Self {
     MyApp {
+      filename: "loading".to_string(),
       code: LOADING_CODE.to_string(),
       colored_text: syntax_highlighting(LOADING_CODE),
       hover_offset: None,
@@ -85,13 +59,20 @@ impl epi::App for MyApp {
       if let Event::JsCall(s) = event {
         let call_response: js::JsCallResponse = serde_json::from_str(s).unwrap();
         if call_response.kind == "fileContents" {
-          self.code = call_response.value;
+          let file_contents_response: js::FileContentsResponse =
+            serde_json::from_str(&call_response.value).unwrap();
+          self.filename = file_contents_response.filename;
+          self.code = file_contents_response.contents;
           self.colored_text = syntax_highlighting(&self.code);
         } else if call_response.kind == "quickInfo" {
-          let deserialized: QuickInfoResponse = serde_json::from_str(&call_response.value).unwrap();
+          let file_contents_response: js::QuickInfoResponse =
+            serde_json::from_str(&call_response.value).unwrap();
           if let Some((hover_offset, _, _)) = self.hover_offset {
-            if deserialized.text_span.includes_offset(hover_offset) {
-              self.display_quick_info = Some(deserialized);
+            if file_contents_response
+              .text_span
+              .includes_offset(hover_offset)
+            {
+              self.display_quick_info = Some(file_contents_response);
             }
           }
         }
@@ -101,8 +82,9 @@ impl epi::App for MyApp {
     if let Some((hover_offset, hover_time, ref mut did_fetch)) = self.hover_offset {
       if !*did_fetch && ctx.input().time > hover_time + 0.3 {
         *did_fetch = true;
+        let filename = self.filename.clone();
         egui_web::spawn_future(async move {
-          js::get_quick_info(hover_offset).await;
+          js::api::get_quick_info(filename, hover_offset).await;
         });
       }
     }
@@ -131,7 +113,7 @@ impl epi::App for MyApp {
           .show(ui, |ui| {
             let code = Code::new(&self.code, &self.colored_text);
             let mut hover_offset: Option<usize> = None;
-            code.ui(ui, &mut hover_offset);
+            let code_response = code.ui(ui, &mut hover_offset);
             if let Some(hover_offset) = hover_offset {
               if match self.hover_offset {
                 Some((old_hover_offset, _, _)) => hover_offset != old_hover_offset,
@@ -157,6 +139,13 @@ impl epi::App for MyApp {
                   )
                   .unwrap();
                 closure.forget();
+              }
+
+              if code_response.clicked {
+                let filename = self.filename.clone();
+                egui_web::spawn_future(async move {
+                  js::api::go_to_definition(filename, hover_offset).await;
+                });
               }
             }
           })

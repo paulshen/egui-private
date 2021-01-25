@@ -47,24 +47,54 @@
         // hack when deploying over HTTP.
         delete WebAssembly.instantiateStreaming;
 
+        const pendingCalls = [];
+        window.rust_callback = v => {
+            pendingCalls.push(v);
+        };
         function set_callback(f) {
             window.rust_callback = v => f(JSON.stringify(v));
+            pendingCalls.forEach(pendingCall => window.rust_callback(pendingCall));
         }
         async function make_call(query) {
-            if (query.kind === 'quickInfo') {
-                const offset = parseInt(query.value);
-                const w = await monaco.languages.typescript.getTypeScriptWorker();
-                const worker = await w();
-                const quickInfo = await worker.getQuickInfoAtPosition('file:///react-reconciler/src/ReactFiberReconciler.new.js', offset);
-                if (quickInfo === undefined) {
-                    return;
+            switch (query.kind) {
+                case 'quickInfo': {
+                    const [filename, offsetString] = query.value.split('$');
+                    const offset = parseInt(offsetString);
+                    const w = await monaco.languages.typescript.getTypeScriptWorker();
+                    const worker = await w();
+                    const quickInfo = await worker.getQuickInfoAtPosition(filename, offset);
+                    if (quickInfo === undefined) {
+                        return;
+                    }
+                    window.rust_callback({
+                        kind: "quickInfo",
+                        value: JSON.stringify(quickInfo),
+                    });
+                    break;
                 }
-                window.rust_callback({
-                    kind: "quickInfo",
-                    value: JSON.stringify(quickInfo),
-                });
+                case 'goToDefinition': {
+                    const [filename, offsetString] = query.value.split('$');
+                    const offset = parseInt(offsetString);
+                    const w = await monaco.languages.typescript.getTypeScriptWorker();
+                    const worker = await w();
+                    const definitions = await worker.getDefinitionAtPosition(filename, offset);
+                    if (definitions === undefined) {
+                        return;
+                    }
+                    const definition = definitions[0];
+                    if (definition === undefined) {
+                        return;
+                    }
+                    window.rust_callback({
+                        kind: 'fileContents',
+                        value: JSON.stringify({
+                            filename: definition.fileName,
+                            contents: monaco.editor.getModel(definition.fileName).getValue(),
+                        }),
+                    });
+                    break;
+                }
             }
-            return;
         }
     </script>
 
@@ -91,7 +121,10 @@
         });
         window.rust_callback({
             kind: 'fileContents',
-            value: monaco.editor.getModel('file:///react-reconciler/src/ReactFiberReconciler.new.js').getValue(),
+            value: JSON.stringify({
+                filename: 'file:///react-reconciler/src/ReactFiberReconciler.new.js',
+                contents: monaco.editor.getModel('file:///react-reconciler/src/ReactFiberReconciler.new.js').getValue(),
+            }),
         });
     </script>
 </body>

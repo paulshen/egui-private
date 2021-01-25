@@ -107,7 +107,7 @@ pub enum Event {
         pressed: bool,
         modifiers: Modifiers,
     },
-    Call(String),
+    JsCall(String),
 }
 
 /// State of the modifier keys. These must be fed to egui.

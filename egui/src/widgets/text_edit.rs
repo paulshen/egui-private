@@ -473,7 +473,7 @@ impl<'t> TextEdit<'t> {
 
                     Event::Key { .. } => None,
 
-                    Event::Call(_) => None,
+                    Event::JsCall(_) => None,
                 };
 
                 if let Some(new_ccursorp) = did_mutate_text {

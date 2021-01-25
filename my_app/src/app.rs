@@ -1,32 +1,61 @@
 use crate::code::{Code, ColoredText};
+use crate::js;
 use eframe::{egui, epi};
-use egui::{vec2, Color32, Stroke, Vec2, Widget};
-use serde::{Deserialize, Serialize};
-use std::sync::mpsc::{Receiver, Sender};
-use wasm_bindgen::prelude::*;
-
-#[derive(Serialize, Deserialize, Debug)]
-struct JsCallResponse {
-  kind: String,
-  value: String,
-}
+use egui::*;
+use serde::Deserialize;
+use wasm_bindgen::prelude::Closure;
 
 pub struct MyApp {
   pub code: String,
   pub colored_text: ColoredText,
-  counter: i32,
-  channel: (Sender<JsCallResponse>, Receiver<JsCallResponse>),
+  hover_offset: Option<(usize, f64, bool)>,
+  display_quick_info: Option<QuickInfoResponse>,
+}
+
+#[derive(Deserialize, Debug)]
+struct TextSpan {
+  start: usize,
+  length: usize,
+}
+
+impl TextSpan {
+  fn includes_offset(&self, offset: usize) -> bool {
+    offset >= self.start && offset < self.start + self.length
+  }
+}
+
+#[derive(Deserialize, Debug)]
+struct DisplayPart {
+  text: String,
+  kind: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct QuickInfoResponse {
+  kind: String,
+  #[serde(rename = "textSpan")]
+  text_span: TextSpan,
+  #[serde(rename = "displayParts")]
+  display_parts: Vec<DisplayPart>,
 }
 
 impl Default for MyApp {
   fn default() -> Self {
     MyApp {
-      code: SAMPLE_CODE.to_string(),
-      colored_text: syntax_highlighting(SAMPLE_CODE),
-      counter: 0,
-      channel: std::sync::mpsc::channel(),
+      code: LOADING_CODE.to_string(),
+      colored_text: syntax_highlighting(LOADING_CODE),
+      hover_offset: None,
+      display_quick_info: None,
     }
   }
+}
+
+fn rgb(rgb: i32) -> Color32 {
+  Color32::from_rgb(
+    (rgb >> 16 & 0xff) as u8,
+    (rgb >> 8 & 0xff) as u8,
+    (rgb & 0xff) as u8,
+  )
 }
 
 impl epi::App for MyApp {
@@ -34,180 +63,130 @@ impl epi::App for MyApp {
     "My App"
   }
 
-  fn setup(&mut self, ctx: &egui::CtxRef) {
-    let mut font_definitions = egui::FontDefinitions::default();
+  fn setup(&mut self, ctx: &CtxRef) {
+    let mut font_definitions = FontDefinitions::default();
     font_definitions.font_data.insert(
       "JetBrainsMono".to_owned(),
       std::borrow::Cow::Borrowed(include_bytes!("JetBrainsMono-Regular.ttf")),
     );
-    font_definitions.fonts_for_family.insert(
-      egui::FontFamily::Monospace,
-      vec!["JetBrainsMono".to_owned()],
-    );
+    font_definitions
+      .fonts_for_family
+      .insert(FontFamily::Monospace, vec!["JetBrainsMono".to_owned()]);
     ctx.set_fonts(font_definitions);
+    let mut style = (*ctx.style()).clone();
+    style.visuals.widgets.noninteractive.bg_stroke = Stroke::new(1., rgb(0x343d46));
+    style.body_text_style = TextStyle::Monospace;
+    style.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1., rgb(0xc0c5ce));
+    ctx.set_style(style);
   }
 
-  fn update(&mut self, ctx: &egui::CtxRef, frame: &mut epi::Frame<'_>) {
-    let (_, receiver) = &self.channel;
-    if let Ok(result) = receiver.try_recv() {
-      self.counter += 1;
-      egui_web::console_log(format!("receive value {:?} {}", result, self.counter));
+  fn update(&mut self, ctx: &CtxRef, frame: &mut epi::Frame<'_>) {
+    for event in ctx.input().events.iter() {
+      if let Event::JsCall(s) = event {
+        let call_response: js::JsCallResponse = serde_json::from_str(s).unwrap();
+        if call_response.kind == "fileContents" {
+          self.code = call_response.value;
+          self.colored_text = syntax_highlighting(&self.code);
+        } else if call_response.kind == "quickInfo" {
+          let deserialized: QuickInfoResponse = serde_json::from_str(&call_response.value).unwrap();
+          if let Some((hover_offset, _, _)) = self.hover_offset {
+            if deserialized.text_span.includes_offset(hover_offset) {
+              self.display_quick_info = Some(deserialized);
+            }
+          }
+        }
+      }
     }
 
-    if let Some(egui::Event::Call(s)) = ctx.input().events.get(0) {
-      self.code = s.to_string();
-      self.colored_text = syntax_highlighting(s);
-      let (sender, _) = &self.channel;
-      let repaint_signal = frame.repaint_signal();
-      let sender = sender.clone();
-      egui_web::spawn_future(async move {
-        let x = go().await;
-        sender.send(x).ok();
-        repaint_signal.request_repaint();
-      });
+    if let Some((hover_offset, hover_time, ref mut did_fetch)) = self.hover_offset {
+      if !*did_fetch && ctx.input().time > hover_time + 0.3 {
+        *did_fetch = true;
+        egui_web::spawn_future(async move {
+          js::get_quick_info(hover_offset).await;
+        });
+      }
     }
-    egui::CentralPanel::default()
-      .frame(egui::Frame {
+
+    CentralPanel::default()
+      .frame(Frame {
         margin: Vec2::zero(),
-        fill: Color32::from_rgb(0x2b, 0x30, 0x3b),
+        fill: rgb(0x2b303b),
         ..Default::default()
       })
       .show(ctx, |ui| {
         let style = ui.style_mut();
         style.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1., Color32::BLACK);
-        style.visuals.dark_bg_color = Color32::from_rgb(0x2b, 0x30, 0x3b);
-        style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(0x4f, 0x5b, 0x66);
-        style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(0x4f, 0x5b, 0x66);
-        style.visuals.widgets.active.bg_fill = Color32::from_rgb(0x4f, 0x5b, 0x66);
-        style.visuals.widgets.hovered.bg_stroke =
-          Stroke::new(1., Color32::from_rgb(0x8f, 0xa1, 0xb3));
-        style.visuals.widgets.active.bg_stroke =
-          Stroke::new(1., Color32::from_rgb(0x8f, 0xa1, 0xb3));
+        style.visuals.dark_bg_color = rgb(0x2b303b);
+        style.visuals.widgets.inactive.bg_fill = rgb(0x4f5b66);
+        style.visuals.widgets.hovered.bg_fill = rgb(0x4f5b66);
+        style.visuals.widgets.active.bg_fill = rgb(0x4f5b66);
+        style.visuals.widgets.hovered.bg_stroke = Stroke::new(1., rgb(0x8fa1b3));
+        style.visuals.widgets.active.bg_stroke = Stroke::new(1., rgb(0x8fa1b3));
 
-        egui::ScrollArea::auto_sized().show(ui, |ui| {
-          egui::Frame {
+        ScrollArea::auto_sized().show(ui, |ui| {
+          Frame {
             margin: vec2(16., 16.),
             ..Default::default()
           }
           .show(ui, |ui| {
             let code = Code::new(&self.code, &self.colored_text);
-            code.ui(ui);
+            let mut hover_offset: Option<usize> = None;
+            code.ui(ui, &mut hover_offset);
+            if let Some(hover_offset) = hover_offset {
+              if match self.hover_offset {
+                Some((old_hover_offset, _, _)) => hover_offset != old_hover_offset,
+                None => true,
+              } {
+                self.hover_offset = Some((hover_offset, ui.input().time, false));
+                if let Some(ref display_quick_info) = self.display_quick_info {
+                  if !display_quick_info.text_span.includes_offset(hover_offset) {
+                    self.display_quick_info = None;
+                  }
+                }
+
+                let repaint_signal = frame.repaint_signal();
+                let closure = Closure::wrap(Box::new(move || {
+                  repaint_signal.request_repaint();
+                }) as Box<dyn FnMut()>);
+                let window = web_sys::window().unwrap();
+                use wasm_bindgen::JsCast;
+                window
+                  .set_timeout_with_callback_and_timeout_and_arguments_0(
+                    closure.as_ref().unchecked_ref(),
+                    300,
+                  )
+                  .unwrap();
+                closure.forget();
+              }
+            }
           })
         });
+
+        if let Some(ref display_quick_info) = self.display_quick_info {
+          show_tooltip(ui.ctx(), |ui| {
+            Frame {
+              margin: vec2(2.0, 0.),
+              ..Default::default()
+            }
+            .show(ui, |ui| {
+              ui.add(Label::new(
+                display_quick_info
+                  .display_parts
+                  .iter()
+                  .map(|display_part| display_part.text.as_str())
+                  .collect::<Vec<&str>>()
+                  .join(""),
+              ));
+            })
+          });
+        }
       });
 
     frame.set_window_size(ctx.used_size());
   }
 }
 
-const SAMPLE_CODE: &str = "// loading...";
-//   "export function createWorkInProgress(current: Fiber, pendingProps: any): Fiber {
-//   let workInProgress = current.alternate;
-//   if (workInProgress === null) {
-//     // We use a double buffering pooling technique because we know that we'll
-//     // only ever need at most two versions of a tree. We pool the other unused
-//     // node that we're free to reuse. This is lazily created to avoid allocating
-//     // extra objects for things that are never updated. It also allow us to
-//     // reclaim the extra memory if needed.
-//     workInProgress = createFiber(
-//       current.tag,
-//       pendingProps,
-//       current.key,
-//       current.mode,
-//     );
-//     workInProgress.elementType = current.elementType;
-//     workInProgress.type = current.type;
-//     workInProgress.stateNode = current.stateNode;
-
-//     if (__DEV__) {
-//       // DEV-only fields
-//       workInProgress._debugID = current._debugID;
-//       workInProgress._debugSource = current._debugSource;
-//       workInProgress._debugOwner = current._debugOwner;
-//       workInProgress._debugHookTypes = current._debugHookTypes;
-//     }
-
-//     workInProgress.alternate = current;
-//     current.alternate = workInProgress;
-//   } else {
-//     workInProgress.pendingProps = pendingProps;
-//     // Needed because Blocks store data on type.
-//     workInProgress.type = current.type;
-
-//     // We already have an alternate.
-//     // Reset the effect tag.
-//     workInProgress.flags = NoFlags;
-
-//     // The effect list is no longer valid.
-//     workInProgress.nextEffect = null;
-//     workInProgress.firstEffect = null;
-//     workInProgress.lastEffect = null;
-//     workInProgress.subtreeFlags = NoFlags;
-//     workInProgress.deletions = null;
-
-//     if (enableProfilerTimer) {
-//       // We intentionally reset, rather than copy, actualDuration & actualStartTime.
-//       // This prevents time from endlessly accumulating in new commits.
-//       // This has the downside of resetting values for different priority renders,
-//       // But works for yielding (the common case) and should support resuming.
-//       workInProgress.actualDuration = 0;
-//       workInProgress.actualStartTime = -1;
-//     }
-//   }
-
-//   // Reset all effects except static ones.
-//   // Static effects are not specific to a render.
-//   workInProgress.flags = current.flags & StaticMask;
-//   workInProgress.childLanes = current.childLanes;
-//   workInProgress.lanes = current.lanes;
-
-//   workInProgress.child = current.child;
-//   workInProgress.memoizedProps = current.memoizedProps;
-//   workInProgress.memoizedState = current.memoizedState;
-//   workInProgress.updateQueue = current.updateQueue;
-
-//   // Clone the dependencies object. This is mutated during the render phase, so
-//   // it cannot be shared with the current fiber.
-//   const currentDependencies = current.dependencies;
-//   workInProgress.dependencies =
-//     currentDependencies === null
-//       ? null
-//       : {
-//           lanes: currentDependencies.lanes,
-//           firstContext: currentDependencies.firstContext,
-//         };
-
-//   // These will be overridden during the parent's reconciliation
-//   workInProgress.sibling = current.sibling;
-//   workInProgress.index = current.index;
-//   workInProgress.ref = current.ref;
-
-//   if (enableProfilerTimer) {
-//     workInProgress.selfBaseDuration = current.selfBaseDuration;
-//     workInProgress.treeBaseDuration = current.treeBaseDuration;
-//   }
-
-//   if (__DEV__) {
-//     workInProgress._debugNeedsRemount = current._debugNeedsRemount;
-//     switch (workInProgress.tag) {
-//       case IndeterminateComponent:
-//       case FunctionComponent:
-//       case SimpleMemoComponent:
-//         workInProgress.type = resolveFunctionForHotReloading(current.type);
-//         break;
-//       case ClassComponent:
-//         workInProgress.type = resolveClassForHotReloading(current.type);
-//         break;
-//       case ForwardRef:
-//         workInProgress.type = resolveForwardRefForHotReloading(current.type);
-//         break;
-//       default:
-//         break;
-//     }
-//   }
-
-//   return workInProgress;
-// }";
+const LOADING_CODE: &str = "// loading...";
 
 fn syntax_highlighting(text: &str) -> ColoredText {
   ColoredText::text_with_extension(text, "js")
@@ -238,15 +217,4 @@ impl ColoredText {
 
     ColoredText(lines)
   }
-}
-
-async fn go() -> JsCallResponse {
-  let js_value = make_call(42).await;
-  let call_value: JsCallResponse = js_value.into_serde().unwrap();
-  call_value
-}
-
-#[wasm_bindgen]
-extern "C" {
-  async fn make_call(value: i32) -> JsValue;
 }

@@ -1230,6 +1230,7 @@ dependencies = [
  "egui_web",
  "js-sys",
  "serde",
+ "serde_json",
  "syntect",
  "wasm-bindgen",
  "wasm-bindgen-futures",

@@ -15,6 +15,7 @@ egui = { version = "0.8.0", path = "../egui" }
 syntect = { version = "4", default_features = false, features = ["default-fancy"], optional = true }
 
 serde = { version = "1", features = ["derive"] }
+serde_json = "1.0"
 
 wasm-bindgen = { version = "0.2", features = ["nightly", "serde-serialize"] }
 web-sys = "0.3"

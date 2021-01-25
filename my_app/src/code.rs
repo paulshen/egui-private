@@ -49,8 +49,8 @@ impl<'a> Code<'a> {
   }
 }
 
-impl<'a> Widget for Code<'a> {
-  fn ui(self, ui: &mut Ui) -> Response {
+impl<'a> Code<'a> {
+  pub fn ui(self, ui: &mut Ui, hover_offset: &mut Option<usize>) -> Response {
     let galley = self.layout(ui);
     let (rect, response) = ui.allocate_exact_size(galley.size, Sense::click());
 
@@ -60,6 +60,8 @@ impl<'a> Widget for Code<'a> {
         let cursor =
           galley.cursor_from_pos(mouse_pos - response.rect.min + vec2(-*font_width / 2., 0.));
         paint_cursor(ui, rect.min, &galley, &cursor);
+
+        *hover_offset = Some(cursor.ccursor.index);
       }
     }
 

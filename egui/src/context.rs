@@ -447,6 +447,10 @@ impl Context {
         self.frame_state.lock()
     }
 
+    pub fn set_scroll_target(&self, offset: f32, align: Align) {
+        self.frame_state().scroll_target = Some((offset, align));
+    }
+
     /// Call this if there is need to repaint the UI, i.e. if you are showing an animation.
     /// If this is called at least once in a frame, then there will be another frame right after this.
     /// Call as many times as you wish, only one repaint will be issued.

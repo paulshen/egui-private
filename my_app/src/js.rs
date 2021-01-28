@@ -82,5 +82,6 @@ pub struct QuickInfoResponse {
 #[derive(Deserialize, Debug)]
 pub struct FileContentsResponse {
   pub filename: String,
+  pub offset: Option<usize>,
   pub contents: String,
 }

@@ -32,6 +32,8 @@ fn rgb(rgb: i32) -> Color32 {
   )
 }
 
+const SCROLL_PADDING_VERTICAL: f32 = 16.;
+
 impl epi::App for MyApp {
   fn name(&self) -> &str {
     "My App"
@@ -55,15 +57,19 @@ impl epi::App for MyApp {
   }
 
   fn update(&mut self, ctx: &CtxRef, frame: &mut epi::Frame<'_>) {
+    let mut scroll_to_code_offset: Option<usize> = None;
     for event in ctx.input().events.iter() {
       if let Event::JsCall(s) = event {
         let call_response: js::JsCallResponse = serde_json::from_str(s).unwrap();
         if call_response.kind == "fileContents" {
           let file_contents_response: js::FileContentsResponse =
             serde_json::from_str(&call_response.value).unwrap();
-          self.filename = file_contents_response.filename;
-          self.code = file_contents_response.contents;
-          self.colored_text = syntax_highlighting(&self.code);
+          if self.filename != file_contents_response.filename {
+            self.filename = file_contents_response.filename;
+            self.code = file_contents_response.contents;
+            self.colored_text = syntax_highlighting(&self.code);
+          }
+          scroll_to_code_offset = file_contents_response.offset;
         } else if call_response.kind == "quickInfo" {
           let file_contents_response: js::QuickInfoResponse =
             serde_json::from_str(&call_response.value).unwrap();
@@ -107,13 +113,17 @@ impl epi::App for MyApp {
 
         ScrollArea::auto_sized().show(ui, |ui| {
           Frame {
-            margin: vec2(16., 16.),
+            margin: vec2(16., SCROLL_PADDING_VERTICAL),
             ..Default::default()
           }
           .show(ui, |ui| {
             let code = Code::new(&self.code, &self.colored_text);
             let mut hover_offset: Option<usize> = None;
-            let code_response = code.ui(ui, &mut hover_offset);
+            let (code_response, scroll_to_offset) =
+              code.ui(ui, &mut hover_offset, scroll_to_code_offset);
+            if let Some(scroll_to_offset) = scroll_to_offset {
+              ctx.set_scroll_target(scroll_to_offset + code_response.rect.top(), Align::Min);
+            }
             if let Some(hover_offset) = hover_offset {
               if match self.hover_offset {
                 Some((old_hover_offset, _, _)) => hover_offset != old_hover_offset,

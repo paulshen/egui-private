@@ -50,7 +50,12 @@ impl<'a> Code<'a> {
 }
 
 impl<'a> Code<'a> {
-  pub fn ui(self, ui: &mut Ui, hover_offset: &mut Option<usize>) -> Response {
+  pub fn ui(
+    self,
+    ui: &mut Ui,
+    hover_offset: &mut Option<usize>,
+    get_offset_pos: Option<usize>,
+  ) -> (Response, Option<f32>) {
     let galley = self.layout(ui);
     let (rect, response) = ui.allocate_exact_size(galley.size, Sense::click());
 
@@ -65,9 +70,16 @@ impl<'a> Code<'a> {
       }
     }
 
+    let offset_pos = get_offset_pos.map(|code_offset| {
+      let pcursor = galley
+        .from_ccursor(paint::text::cursor::CCursor::new(code_offset))
+        .pcursor;
+      galley.pos_from_pcursor(pcursor).top()
+    });
+
     self.paint_galley(ui, rect.min, galley);
 
-    response
+    (response, offset_pos)
   }
 }
 

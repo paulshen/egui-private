@@ -89,6 +89,7 @@
                         kind: 'fileContents',
                         value: JSON.stringify({
                             filename: definition.fileName,
+                            offset: definition.textSpan.start,
                             contents: monaco.editor.getModel(definition.fileName).getValue(),
                         }),
                     });

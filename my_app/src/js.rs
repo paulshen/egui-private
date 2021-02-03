@@ -38,6 +38,22 @@ pub mod api {
     .await;
   }
 
+  pub async fn get_definition(filename: String, offset: usize) {
+    make_call(JsCallQuery {
+      kind: "getDefinition".to_string(),
+      value: format!("{}${}", filename, offset),
+    })
+    .await;
+  }
+
+  pub async fn go_to_location(filename: String, offset: usize) {
+    make_call(JsCallQuery {
+      kind: "goToLocation".to_string(),
+      value: format!("{}${}", filename, offset),
+    })
+    .await;
+  }
+
   pub async fn go_to_definition(filename: String, offset: usize) {
     make_call(JsCallQuery {
       kind: "goToDefinition".to_string(),
@@ -84,4 +100,14 @@ pub struct FileContentsResponse {
   pub filename: String,
   pub offset: Option<usize>,
   pub contents: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct GetDefinitionResponse {
+  #[serde(rename = "queryFilename")]
+  pub query_filename: String,
+  #[serde(rename = "queryOffset")]
+  pub query_offset: usize,
+  pub filename: String,
+  pub offset: usize,
 }

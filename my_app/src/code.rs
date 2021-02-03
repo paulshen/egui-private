@@ -55,7 +55,7 @@ impl<'a> Code<'a> {
     ui: &mut Ui,
     hover_offset: &mut Option<usize>,
     get_offset_pos: Option<usize>,
-  ) -> (Response, Option<f32>) {
+  ) -> (Response, Option<f32>, Galley) {
     let galley = self.layout(ui);
     let (rect, response) = ui.allocate_exact_size(galley.size, Sense::click());
 
@@ -77,9 +77,9 @@ impl<'a> Code<'a> {
       galley.pos_from_pcursor(pcursor).top()
     });
 
-    self.paint_galley(ui, rect.min, galley);
+    self.paint_galley(ui, rect.min, galley.clone());
 
-    (response, offset_pos)
+    (response, offset_pos, galley)
   }
 }
 

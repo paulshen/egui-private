@@ -9,7 +9,10 @@ pub struct MyApp {
   pub code: String,
   pub colored_text: ColoredText,
   hover_offset: Option<(usize, f64, bool)>,
-  display_quick_info: Option<js::QuickInfoResponse>,
+  display_quick_info: (
+    Option<js::QuickInfoResponse>,
+    Option<js::GetDefinitionResponse>,
+  ),
 }
 
 impl Default for MyApp {
@@ -19,7 +22,7 @@ impl Default for MyApp {
       code: LOADING_CODE.to_string(),
       colored_text: syntax_highlighting(LOADING_CODE),
       hover_offset: None,
-      display_quick_info: None,
+      display_quick_info: (None, None),
     }
   }
 }
@@ -70,15 +73,26 @@ impl epi::App for MyApp {
             self.colored_text = syntax_highlighting(&self.code);
           }
           scroll_to_code_offset = file_contents_response.offset;
-        } else if call_response.kind == "quickInfo" {
-          let file_contents_response: js::QuickInfoResponse =
+        } else if call_response.kind == "getDefinition" {
+          let response: js::GetDefinitionResponse =
             serde_json::from_str(&call_response.value).unwrap();
+          if self.filename == response.query_filename {
+            if let (Some(ref quick_info), _) = self.display_quick_info {
+              if quick_info.text_span.start == response.query_offset {
+                self.display_quick_info.1 = Some(response);
+              }
+            }
+          }
+        } else if call_response.kind == "quickInfo" {
+          let response: js::QuickInfoResponse = serde_json::from_str(&call_response.value).unwrap();
           if let Some((hover_offset, _, _)) = self.hover_offset {
-            if file_contents_response
-              .text_span
-              .includes_offset(hover_offset)
-            {
-              self.display_quick_info = Some(file_contents_response);
+            if response.text_span.includes_offset(hover_offset) {
+              let offset = response.text_span.start;
+              self.display_quick_info = (Some(response), None);
+              let filename = self.filename.clone();
+              egui_web::spawn_future(
+                async move { js::api::get_definition(filename, offset).await },
+              );
             }
           }
         }
@@ -86,12 +100,12 @@ impl epi::App for MyApp {
     }
 
     if let Some((hover_offset, hover_time, ref mut did_fetch)) = self.hover_offset {
-      if !*did_fetch && ctx.input().time > hover_time + 0.3 {
+      if !*did_fetch && ctx.input().time > hover_time + 0.05 {
         *did_fetch = true;
         let filename = self.filename.clone();
-        egui_web::spawn_future(async move {
-          js::api::get_quick_info(filename, hover_offset).await;
-        });
+        egui_web::spawn_future(
+          async move { js::api::get_quick_info(filename, hover_offset).await },
+        );
       }
     }
 
@@ -119,7 +133,9 @@ impl epi::App for MyApp {
           .show(ui, |ui| {
             let code = Code::new(&self.code, &self.colored_text);
             let mut hover_offset: Option<usize> = None;
-            let (code_response, scroll_to_offset) =
+            let where_to_put_background = ui.painter().add(Shape::Noop);
+
+            let (code_response, scroll_to_offset, galley) =
               code.ui(ui, &mut hover_offset, scroll_to_code_offset);
             if let Some(scroll_to_offset) = scroll_to_offset {
               ctx.set_scroll_target(scroll_to_offset + code_response.rect.top(), Align::Min);
@@ -129,12 +145,16 @@ impl epi::App for MyApp {
                 Some((old_hover_offset, _, _)) => hover_offset != old_hover_offset,
                 None => true,
               } {
-                self.hover_offset = Some((hover_offset, ui.input().time, false));
-                if let Some(ref display_quick_info) = self.display_quick_info {
+                let mut does_overlap_with_current = true;
+                if let (Some(ref display_quick_info), _) = self.display_quick_info {
                   if !display_quick_info.text_span.includes_offset(hover_offset) {
-                    self.display_quick_info = None;
+                    self.display_quick_info = (None, None);
+                  } else {
+                    does_overlap_with_current = false;
                   }
                 }
+                self.hover_offset =
+                  Some((hover_offset, ui.input().time, !does_overlap_with_current));
 
                 let repaint_signal = frame.repaint_signal();
                 let closure = Closure::wrap(Box::new(move || {
@@ -145,23 +165,58 @@ impl epi::App for MyApp {
                 window
                   .set_timeout_with_callback_and_timeout_and_arguments_0(
                     closure.as_ref().unchecked_ref(),
-                    300,
+                    50,
                   )
                   .unwrap();
                 closure.forget();
               }
 
               if code_response.clicked {
-                let filename = self.filename.clone();
-                egui_web::spawn_future(async move {
-                  js::api::go_to_definition(filename, hover_offset).await;
-                });
+                if let (_, Some(ref definition)) = self.display_quick_info {
+                  let filename = definition.filename.clone();
+                  let offset = definition.offset;
+                  egui_web::spawn_future(async move {
+                    js::api::go_to_location(filename, offset).await;
+                  });
+                }
               }
+            }
+
+            if let (Some(ref display_quick_info), Some(ref _destination)) = self.display_quick_info
+            {
+              let start_cursor = galley.from_ccursor(paint::text::cursor::CCursor {
+                index: display_quick_info.text_span.start,
+                prefer_next_row: false,
+              });
+              let end_cursor = galley.from_ccursor(paint::text::cursor::CCursor {
+                index: display_quick_info.text_span.start + display_quick_info.text_span.length,
+                prefer_next_row: false,
+              });
+              let rects = paint_cursor_selection(
+                code_response.rect.left_top(),
+                &galley,
+                start_cursor,
+                end_cursor,
+              );
+              let token_color =
+                get_color_at_offset(&self.colored_text, display_quick_info.text_span.start);
+              ui.painter().set(
+                where_to_put_background,
+                Shape::Vec(
+                  rects
+                    .into_iter()
+                    .map(|rect| Shape::LineSegment {
+                      points: [rect.left_bottom(), rect.right_bottom()],
+                      stroke: (1.0, token_color).into(),
+                    })
+                    .collect(),
+                ),
+              );
             }
           })
         });
 
-        if let Some(ref display_quick_info) = self.display_quick_info {
+        if let (Some(ref display_quick_info), _) = self.display_quick_info {
           show_tooltip(ui.ctx(), |ui| {
             Frame {
               margin: vec2(2.0, 0.),
@@ -179,6 +234,10 @@ impl epi::App for MyApp {
             })
           });
         }
+
+        // if let (_, Some(ref definition_info)) = self.display_quick_info {
+        //   egui_web::console_log(format!("definition {}", definition_info.offset));
+        // }
       });
 
     frame.set_window_size(ctx.used_size());
@@ -216,4 +275,58 @@ impl ColoredText {
 
     ColoredText(lines)
   }
+}
+
+fn paint_cursor_selection(
+  pos: Pos2,
+  galley: &paint::text::Galley,
+  min: paint::text::cursor::Cursor,
+  max: paint::text::cursor::Cursor,
+) -> Vec<Rect> {
+  let min = min.rcursor;
+  let max = max.rcursor;
+
+  let mut rv = vec![];
+
+  for ri in min.row..=max.row {
+    let row = &galley.rows[ri];
+    let left = if ri == min.row {
+      row.x_offset(min.column)
+    } else {
+      row.min_x()
+    };
+    let right = if ri == max.row {
+      row.x_offset(max.column)
+    } else {
+      let newline_size = if row.ends_with_newline {
+        row.height() / 2.0 // visualize that we select the newline
+      } else {
+        0.0
+      };
+      row.max_x() + newline_size
+    };
+    let rect = Rect::from_min_max(pos + vec2(left, row.y_min), pos + vec2(right, row.y_max));
+    rv.push(rect);
+  }
+
+  rv
+}
+
+fn get_color_at_offset(text: &ColoredText, offset: usize) -> Color32 {
+  let mut iter = 0;
+  for row in text.0.iter() {
+    for token in row {
+      let token_len = token.1.len();
+      if token_len == 0 {
+        continue;
+      }
+      iter += token_len;
+      if offset < iter {
+        let fg = token.0.foreground;
+        return Color32::from_rgb(fg.r, fg.g, fg.b);
+      }
+    }
+    iter += 1;
+  }
+  panic!();
 }

@@ -2,27 +2,35 @@ use crate::code::{Code, ColoredText};
 use crate::js;
 use eframe::{egui, epi};
 use egui::*;
+use std::collections::HashMap;
 use wasm_bindgen::prelude::Closure;
 
+struct FileData(String, ColoredText);
+
 pub struct MyApp {
-  pub filename: String,
-  pub code: String,
-  pub colored_text: ColoredText,
+  filename: String,
+  files: HashMap<String, FileData>,
   hover_offset: Option<(usize, f64, bool)>,
   display_quick_info: (
     Option<js::QuickInfoResponse>,
     Option<js::GetDefinitionResponse>,
   ),
+  scroll_to_code_offset: Option<usize>,
 }
 
 impl Default for MyApp {
   fn default() -> Self {
+    let mut files = HashMap::new();
+    files.insert(
+      "loading".to_string(),
+      FileData(LOADING_CODE.to_string(), syntax_highlighting(LOADING_CODE)),
+    );
     MyApp {
       filename: "loading".to_string(),
-      code: LOADING_CODE.to_string(),
-      colored_text: syntax_highlighting(LOADING_CODE),
+      files,
       hover_offset: None,
       display_quick_info: (None, None),
+      scroll_to_code_offset: None,
     }
   }
 }
@@ -60,7 +68,8 @@ impl epi::App for MyApp {
   }
 
   fn update(&mut self, ctx: &CtxRef, frame: &mut epi::Frame<'_>) {
-    let mut scroll_to_code_offset: Option<usize> = None;
+    let mut scroll_to_code_offset: Option<usize> = self.scroll_to_code_offset;
+    self.scroll_to_code_offset = None;
     for event in ctx.input().events.iter() {
       if let Event::JsCall(s) = event {
         let call_response: js::JsCallResponse = serde_json::from_str(s).unwrap();
@@ -69,8 +78,11 @@ impl epi::App for MyApp {
             serde_json::from_str(&call_response.value).unwrap();
           if self.filename != file_contents_response.filename {
             self.filename = file_contents_response.filename;
-            self.code = file_contents_response.contents;
-            self.colored_text = syntax_highlighting(&self.code);
+            let colored_text = syntax_highlighting(&file_contents_response.contents);
+            self.files.insert(
+              self.filename.clone(),
+              FileData(file_contents_response.contents, colored_text),
+            );
           }
           scroll_to_code_offset = file_contents_response.offset;
         } else if call_response.kind == "getDefinition" {
@@ -131,7 +143,9 @@ impl epi::App for MyApp {
             ..Default::default()
           }
           .show(ui, |ui| {
-            let code = Code::new(&self.code, &self.colored_text);
+            let file_data = self.files.get(&self.filename).unwrap();
+            let colored_text = &file_data.1;
+            let code = Code::new(&file_data.0, colored_text);
             let mut hover_offset: Option<usize> = None;
             let where_to_put_background = ui.painter().add(Shape::Noop);
 
@@ -173,11 +187,17 @@ impl epi::App for MyApp {
 
               if code_response.clicked {
                 if let (_, Some(ref definition)) = self.display_quick_info {
-                  let filename = definition.filename.clone();
-                  let offset = definition.offset;
-                  egui_web::spawn_future(async move {
-                    js::api::go_to_location(filename, offset).await;
-                  });
+                  if self.files.get(&definition.filename).is_some() {
+                    self.filename = definition.filename.clone();
+                    self.scroll_to_code_offset = Some(definition.offset);
+                  } else {
+                    let filename = definition.filename.clone();
+                    let offset = definition.offset;
+                    egui_web::spawn_future(async move {
+                      js::api::go_to_location(filename, offset).await;
+                    });
+                  }
+                  self.display_quick_info.1 = None;
                 }
               }
             }
@@ -199,7 +219,7 @@ impl epi::App for MyApp {
                 end_cursor,
               );
               let token_color =
-                get_color_at_offset(&self.colored_text, display_quick_info.text_span.start);
+                get_color_at_offset(colored_text, display_quick_info.text_span.start);
               ui.painter().set(
                 where_to_put_background,
                 Shape::Vec(
@@ -328,5 +348,5 @@ fn get_color_at_offset(text: &ColoredText, offset: usize) -> Color32 {
     }
     iter += 1;
   }
-  panic!();
+  panic!("panic message");
 }

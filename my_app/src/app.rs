@@ -16,6 +16,7 @@ pub struct MyApp {
     Option<js::GetDefinitionResponse>,
   ),
   scroll_to_code_offset: Option<usize>,
+  navigation_history: Vec<(String, usize, String)>,
 }
 
 impl Default for MyApp {
@@ -31,6 +32,7 @@ impl Default for MyApp {
       hover_offset: None,
       display_quick_info: (None, None),
       scroll_to_code_offset: None,
+      navigation_history: vec![],
     }
   }
 }
@@ -56,6 +58,9 @@ impl epi::App for MyApp {
       "JetBrainsMono".to_owned(),
       std::borrow::Cow::Borrowed(include_bytes!("JetBrainsMono-Regular.ttf")),
     );
+    font_definitions
+      .fonts_for_family
+      .insert(FontFamily::Proportional, vec!["JetBrainsMono".to_owned()]);
     font_definitions
       .fonts_for_family
       .insert(FontFamily::Monospace, vec!["JetBrainsMono".to_owned()]);
@@ -137,103 +142,129 @@ impl epi::App for MyApp {
         style.visuals.widgets.hovered.bg_stroke = Stroke::new(1., rgb(0x8fa1b3));
         style.visuals.widgets.active.bg_stroke = Stroke::new(1., rgb(0x8fa1b3));
 
-        ScrollArea::auto_sized().show(ui, |ui| {
-          Frame {
-            margin: vec2(16., SCROLL_PADDING_VERTICAL),
-            ..Default::default()
+        let frame_height = ui.available_size().y;
+        ui.horizontal(|ui| {
+          ui.allocate_space(vec2(256.0, frame_height));
+          let mut sidebar_ui = ui.child_ui(
+            Rect::from_min_max(Pos2::zero(), pos2(256.0, frame_height)),
+            Layout::top_down(Align::Min),
+          );
+
+          ScrollArea::auto_sized().show(ui, |ui| {
+            Frame {
+              margin: vec2(16., SCROLL_PADDING_VERTICAL),
+              ..Default::default()
+            }
+            .show(ui, |ui| {
+              let file_data = self.files.get(&self.filename).unwrap();
+              let colored_text = &file_data.1;
+              let code = Code::new(&file_data.0, colored_text);
+              let mut hover_offset: Option<usize> = None;
+              let where_to_put_background = ui.painter().add(Shape::Noop);
+
+              let (code_response, scroll_to_offset, galley) =
+                code.ui(ui, &mut hover_offset, scroll_to_code_offset);
+              if let Some(scroll_to_offset) = scroll_to_offset {
+                ctx.set_scroll_target(scroll_to_offset + code_response.rect.top(), Align::Min);
+                ctx.skip_paint();
+              }
+              if let Some(hover_offset) = hover_offset {
+                if match self.hover_offset {
+                  Some((old_hover_offset, _, _)) => hover_offset != old_hover_offset,
+                  None => true,
+                } {
+                  let mut does_overlap_with_current = true;
+                  if let (Some(ref display_quick_info), _) = self.display_quick_info {
+                    if !display_quick_info.text_span.includes_offset(hover_offset) {
+                      self.display_quick_info = (None, None);
+                    } else {
+                      does_overlap_with_current = false;
+                    }
+                  }
+                  self.hover_offset =
+                    Some((hover_offset, ui.input().time, !does_overlap_with_current));
+
+                  let repaint_signal = frame.repaint_signal();
+                  let closure = Closure::wrap(Box::new(move || {
+                    repaint_signal.request_repaint();
+                  }) as Box<dyn FnMut()>);
+                  let window = web_sys::window().unwrap();
+                  use wasm_bindgen::JsCast;
+                  window
+                    .set_timeout_with_callback_and_timeout_and_arguments_0(
+                      closure.as_ref().unchecked_ref(),
+                      50,
+                    )
+                    .unwrap();
+                  closure.forget();
+                }
+
+                if code_response.clicked {
+                  if let (_, Some(ref definition)) = self.display_quick_info {
+                    let name = definition.name.clone();
+                    if self.files.get(&definition.filename).is_some() {
+                      self.filename = definition.filename.clone();
+                      self.scroll_to_code_offset = Some(definition.offset);
+                    } else {
+                      let filename = definition.filename.clone();
+                      let offset = definition.offset;
+                      egui_web::spawn_future(async move {
+                        js::api::go_to_location(filename, offset).await;
+                      });
+                    }
+                    self.navigation_history.push((
+                      definition.filename.clone(),
+                      definition.offset,
+                      name,
+                    ));
+                    self.display_quick_info.1 = None;
+                  }
+                }
+              }
+
+              if let (Some(ref display_quick_info), Some(ref _destination)) =
+                self.display_quick_info
+              {
+                let start_cursor = galley.from_ccursor(paint::text::cursor::CCursor {
+                  index: display_quick_info.text_span.start,
+                  prefer_next_row: false,
+                });
+                let end_cursor = galley.from_ccursor(paint::text::cursor::CCursor {
+                  index: display_quick_info.text_span.start + display_quick_info.text_span.length,
+                  prefer_next_row: false,
+                });
+                let rects = paint_cursor_selection(
+                  code_response.rect.left_top(),
+                  &galley,
+                  start_cursor,
+                  end_cursor,
+                );
+                let token_color =
+                  get_color_at_offset(colored_text, display_quick_info.text_span.start);
+                ui.painter().set(
+                  where_to_put_background,
+                  Shape::Vec(
+                    rects
+                      .into_iter()
+                      .map(|rect| Shape::LineSegment {
+                        points: [rect.left_bottom(), rect.right_bottom()],
+                        stroke: (1.0, token_color).into(),
+                      })
+                      .collect(),
+                  ),
+                );
+              }
+            })
+          });
+
+          // Render sidebar after so we don't update filename on this frame
+          sidebar_ui.set_clip_rect(Rect::from_min_max(Pos2::zero(), pos2(256.0, frame_height)));
+          for (filename, offset, name) in self.navigation_history.iter().rev() {
+            if sidebar_ui.button(name.clone()).clicked {
+              self.filename = filename.clone();
+              self.scroll_to_code_offset = Some(*offset);
+            }
           }
-          .show(ui, |ui| {
-            let file_data = self.files.get(&self.filename).unwrap();
-            let colored_text = &file_data.1;
-            let code = Code::new(&file_data.0, colored_text);
-            let mut hover_offset: Option<usize> = None;
-            let where_to_put_background = ui.painter().add(Shape::Noop);
-
-            let (code_response, scroll_to_offset, galley) =
-              code.ui(ui, &mut hover_offset, scroll_to_code_offset);
-            if let Some(scroll_to_offset) = scroll_to_offset {
-              ctx.set_scroll_target(scroll_to_offset + code_response.rect.top(), Align::Min);
-            }
-            if let Some(hover_offset) = hover_offset {
-              if match self.hover_offset {
-                Some((old_hover_offset, _, _)) => hover_offset != old_hover_offset,
-                None => true,
-              } {
-                let mut does_overlap_with_current = true;
-                if let (Some(ref display_quick_info), _) = self.display_quick_info {
-                  if !display_quick_info.text_span.includes_offset(hover_offset) {
-                    self.display_quick_info = (None, None);
-                  } else {
-                    does_overlap_with_current = false;
-                  }
-                }
-                self.hover_offset =
-                  Some((hover_offset, ui.input().time, !does_overlap_with_current));
-
-                let repaint_signal = frame.repaint_signal();
-                let closure = Closure::wrap(Box::new(move || {
-                  repaint_signal.request_repaint();
-                }) as Box<dyn FnMut()>);
-                let window = web_sys::window().unwrap();
-                use wasm_bindgen::JsCast;
-                window
-                  .set_timeout_with_callback_and_timeout_and_arguments_0(
-                    closure.as_ref().unchecked_ref(),
-                    50,
-                  )
-                  .unwrap();
-                closure.forget();
-              }
-
-              if code_response.clicked {
-                if let (_, Some(ref definition)) = self.display_quick_info {
-                  if self.files.get(&definition.filename).is_some() {
-                    self.filename = definition.filename.clone();
-                    self.scroll_to_code_offset = Some(definition.offset);
-                  } else {
-                    let filename = definition.filename.clone();
-                    let offset = definition.offset;
-                    egui_web::spawn_future(async move {
-                      js::api::go_to_location(filename, offset).await;
-                    });
-                  }
-                  self.display_quick_info.1 = None;
-                }
-              }
-            }
-
-            if let (Some(ref display_quick_info), Some(ref _destination)) = self.display_quick_info
-            {
-              let start_cursor = galley.from_ccursor(paint::text::cursor::CCursor {
-                index: display_quick_info.text_span.start,
-                prefer_next_row: false,
-              });
-              let end_cursor = galley.from_ccursor(paint::text::cursor::CCursor {
-                index: display_quick_info.text_span.start + display_quick_info.text_span.length,
-                prefer_next_row: false,
-              });
-              let rects = paint_cursor_selection(
-                code_response.rect.left_top(),
-                &galley,
-                start_cursor,
-                end_cursor,
-              );
-              let token_color =
-                get_color_at_offset(colored_text, display_quick_info.text_span.start);
-              ui.painter().set(
-                where_to_put_background,
-                Shape::Vec(
-                  rects
-                    .into_iter()
-                    .map(|rect| Shape::LineSegment {
-                      points: [rect.left_bottom(), rect.right_bottom()],
-                      stroke: (1.0, token_color).into(),
-                    })
-                    .collect(),
-                ),
-              );
-            }
-          })
         });
 
         if let (Some(ref display_quick_info), _) = self.display_quick_info {

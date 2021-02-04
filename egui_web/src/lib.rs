@@ -211,6 +211,7 @@ pub fn handle_output(output: &egui::Output) {
         open_url,
         copied_text,
         needs_repaint: _, // handled elsewhere
+        skip_paint: _,
     } = output;
 
     set_cursor_icon(*cursor_icon);
@@ -397,7 +398,11 @@ fn paint_and_schedule(runner_ref: AppRunnerRef) -> Result<(), JsValue> {
         let mut runner_lock = runner_ref.0.lock();
         if runner_lock.needs_repaint.fetch_and_clear() {
             let (output, paint_jobs) = runner_lock.logic()?;
-            runner_lock.paint(paint_jobs)?;
+            if !output.skip_paint {
+                runner_lock.paint(paint_jobs)?;
+            } else {
+                console_log("skip paint");
+            }
             if output.needs_repaint {
                 runner_lock.needs_repaint.set_true();
             }

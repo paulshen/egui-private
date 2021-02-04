@@ -399,6 +399,8 @@ pub struct Context {
 
     /// While positive, keep requesting repaints. Decrement at the end of each frame.
     repaint_requests: AtomicU32,
+
+    skip_paint: Mutex<bool>,
 }
 
 impl Clone for Context {
@@ -413,6 +415,7 @@ impl Clone for Context {
             output: self.output.clone(),
             paint_stats: self.paint_stats.clone(),
             repaint_requests: self.repaint_requests.load(SeqCst).into(),
+            skip_paint: self.skip_paint.clone(),
         }
     }
 }
@@ -594,6 +597,8 @@ impl Context {
                 interactable: true,
             },
         );
+
+        *(self.skip_paint.lock()) = false;
     }
 
     /// Call at the end of each frame.
@@ -614,8 +619,16 @@ impl Context {
             output.needs_repaint = true;
         }
 
+        if *(self.skip_paint.lock()) {
+            output.skip_paint = true;
+        }
+
         let shapes = self.drain_paint_lists();
         (output, shapes)
+    }
+
+    pub fn skip_paint(&self) {
+        *(self.skip_paint.lock()) = true;
     }
 
     fn drain_paint_lists(&self) -> Vec<ClippedShape> {

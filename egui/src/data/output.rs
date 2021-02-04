@@ -20,6 +20,7 @@ pub struct Output {
     /// As an egui user: don't set this value directly.
     /// Call `Context::request_repaint()` instead and it will do so for you.
     pub needs_repaint: bool,
+    pub skip_paint: bool,
 }
 
 /// A mouse cursor icon.

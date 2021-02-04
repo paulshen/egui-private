@@ -110,4 +110,5 @@ pub struct GetDefinitionResponse {
   pub query_offset: usize,
   pub filename: String,
   pub offset: usize,
+  pub name: String,
 }
